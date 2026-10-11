@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waka Campa Agent Portal</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/search"><span class="brand-mark">WC</span><span class="brand-name">Waka Campa <em>Agents</em></span></a>
+      <nav id="nav" class="nav" hidden>
+        <a href="#/search" data-route="search">New booking</a>
+        <a href="#/bookings" data-route="bookings">My bookings</a>
+      </nav>
+      <div id="who" class="who" hidden>
+        <span id="who-name"></span>
+        <button id="sign-out" class="link">Sign out</button>
+      </div>
+    </div>
+    <div id="demo-banner" class="demo-banner" hidden>Demo mode: sample data, nothing is saved to Waka Campa. Sign-in code is 123456.</div>
+  </header>
+
+  <main id="app" class="container" aria-live="polite"></main>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="vendor/engine.js"></script>
+  <script src="vendor/demo-data.js"></script>
+  <script src="api.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

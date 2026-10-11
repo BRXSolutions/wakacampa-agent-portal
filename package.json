@@ -1,0 +1,13 @@
+{
+  "name": "wakacampa-agent-portal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Waka Campa agent portal and Agent API engine (replacement for RCM Agent API)",
+  "scripts": {
+    "test": "node --test engine/test/core.test.js n8n/test/flow.test.js",
+    "build:portal": "node scripts/build-portal.js",
+    "build:n8n": "node scripts/build-n8n.js",
+    "serve": "npx --yes http-server portal -p 8080 -c-1"
+  },
+  "engines": { "node": ">=18" }
+}
