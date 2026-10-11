@@ -412,9 +412,16 @@
   }
 
   /* ---------------- booking detail + cancel ---------------- */
-  async function viewBooking(ref, query) {
+    async function viewBooking(ref, query) {
     loading('Loading booking');
-    const info = (await api.call('bookinginfo', { reservationref: ref }))[0];
+    let info;
+    for (let attempt = 0; ; attempt++) {
+      try { info = (await api.call('bookinginfo', { reservationref: ref }))[0]; break; }
+      catch (e) {
+        if (e.code !== 'NOT_FOUND' || attempt >= 5) throw e;
+        await new Promise(r => setTimeout(r, 1500));
+      }
+    }
     const b = info.bookinginfo[0];
     const c = info.customerinfo[0] || {};
     const isNew = query.get('new') === '1';
