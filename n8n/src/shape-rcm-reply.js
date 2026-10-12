@@ -3,7 +3,8 @@ const ctx = $('Prepare RCM Call').first().json;
 const r = ($input.first() || {}).json || {};
 
 if (r.status !== 'OK') {
-  const msg = r.error || r.message || (r.error && r.error.message) || 'The booking service did not accept the request.';
+  const res0 = Array.isArray(r.results) ? r.results[0] : r.results;
+  const msg = r.error || r.message || (res0 && res0.successmsg) || 'The booking service did not accept the request.';
   console.log('RCM ' + ctx.method + ' failed: ' + String(msg).slice(0, 300));
   return respond(null, String(msg), 'RCM');
 }
@@ -19,6 +20,13 @@ if (ctx.post === 'bookinginfo') {
   const bi = Array.isArray(first.bookinginfo) ? first.bookinginfo[0] : null;
   if (bi && ctx.booking) {
     bi.agentrefno = bi.agentrefno || ctx.booking.agentRefNo || '';
+    if (ctx.booking.rcmMode === 'direct') {
+      /* RCM holds this as a Waka Campa booking, so commission comes from our agency record, on RCM's current total. */
+      const pct = Number(ctx.booking.commissionPct || 0);
+      const total = Number(bi.totalcost || ctx.booking.total || 0);
+      bi.agentcommission = Math.round(total * pct) / 100;
+      bi.agentnetamountdue = Math.round((total - bi.agentcommission) * 100) / 100;
+    }
     if (bi.agentcommission === undefined || bi.agentcommission === null) bi.agentcommission = 0;
   }
   return respond(out);
@@ -41,9 +49,9 @@ if (ctx.post === 'booking') {
     agencyName: ctx.agency.name,
     agentCode: ctx.agency.agentCode,
     agentUserId: ctx.user.id,
-    agentName: reqBody.agentname,
-    agentEmail: reqBody.agentemail,
-    agentRefNo: reqBody.agentrefno || '',
+    agentName: ctx.agent.name,
+    agentEmail: ctx.agent.email,
+    agentRefNo: ctx.agent.refNo,
     reservationRef: first.reservationref,
     reservationNo: first.reservationno,
     rcmCustomerId: first.customerid || '',
@@ -60,7 +68,10 @@ if (ctx.post === 'booking') {
     categoryName: ctx.display.category,
     total: ctx.display.total,
     customer: { firstname: reqBody.customer.firstname || '', lastname: reqBody.customer.lastname, email: reqBody.customer.email },
-    engine: 'rcm-mirror'
+    engine: 'rcm-mirror',
+    rcmMode: 'direct',
+    commissionPct: Number(ctx.agency.commissionPct || 0),
+    commission: Math.round(Number(ctx.display.total || 0) * Number(ctx.agency.commissionPct || 0)) / 100
   };
   const properties = {
     booking_number: String(first.reservationno),
@@ -74,14 +85,14 @@ if (ctx.post === 'booking') {
     vehiclecategory: booking.categoryName,
     rentalsource: 'Agent portal - ' + ctx.agency.name,
     booking_type: booking.isQuotation ? 'quotation' : 'booking',
-    totalcost: booking.total || 0,
+    totalcost: { currency: 'default', value: booking.total || 0 },
     booking_json: JSON.stringify(booking)
   };
   return [{ json: { route: 'save', properties, reply: [{ reservationref: first.reservationref, reservationno: first.reservationno, customerid: first.customerid || '' }] } }];
 }
 
 if (ctx.post === 'cancel') {
-  if (first.success === false) return respond(null, first.successmsg || 'Booking could not be cancelled', 'RCM');
+  if (first.success === false || String(first.success).toLowerCase() === 'false') return respond(null, first.successmsg || 'Booking could not be cancelled', 'RCM');
   const b = Object.assign({}, ctx.booking, { status: 'cancelled', cancelledAt: new Date().toISOString(), cancelledBy: ctx.user.email });
   const recordId = b.recordId; delete b.recordId;
   return [{ json: { route: 'mark_cancelled', recordId, properties: { reservationstatus: 'cancelled', booking_json: JSON.stringify(b) }, reply: [{ success: true, successmsg: 'OK', reservationref: b.reservationRef }] } }];
