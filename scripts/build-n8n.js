@@ -102,7 +102,7 @@ const findAgentContact = node({
       sendBody: true, specifyBody: 'json',
       jsonBody: expr('{{ JSON.stringify({ locationId: ${J(E.locationId)}, pageLimit: 5, filters: [{ field: "email", operator: "eq", value: $json.email }] }) }}'),
       options: { timeout: 20000 } } },
-  output: [{ contacts: [{ id: 'c1', email: 'a@b.c', tags: ['agent_user'], companyId: 'b1', firstName: 'A' }] }]
+  output: [{ contacts: [{ id: 'c1', email: 'a@b.c', tags: ['agent_user'], businessId: 'b1', firstName: 'A' }] }]
 });
 
 const getAgencyRecord = node({
@@ -110,7 +110,7 @@ const getAgencyRecord = node({
   config: { name: 'Get Agency Record', position: [896, 160], alwaysOutputData: true, onError: 'continueRegularOutput',
     credentials: ghlCred,
     parameters: { method: 'GET',
-      url: expr('${GHL}/objects/business/records/{{ (($json.contacts || []).find(c => String(c.email || "").toLowerCase() === $("Route Request").first().json.email) || {}).companyId || (($json.contacts || [])[0] || {}).businessId || "none" }}'),
+      url: expr('${GHL}/objects/business/records/{{ ((($json.contacts || []).find(c => String(c.email || "").toLowerCase() === $("Route Request").first().json.email) || ($json.contacts || [])[0] || {}).businessId) || "none" }}'),
       authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
       sendHeaders: true, headerParameters: { parameters: [{ name: 'Version', value: '2021-07-28' }] },
       options: { timeout: 20000 } } },
@@ -274,7 +274,7 @@ const sendWriteResponse = node({
   } }
 });
 
-const notes = sticky(${J(`## ${E.name}\nOur replacement for the RCM Agent API. One endpoint: POST {"method": ...} with a Bearer session token.\n\n**Phase 1 (this version):** pricing, availability and the booking itself go through RCM's v3.2 Web Booking API (apikey + HMAC); bookinginfo and cancel use RCM's Post-Booking API (token), so RCM stays the single inventory (mirror mode). GHL holds agent identity and the agency's booking register.\n\n**Agents:** GHL Contact tagged agent_user, linked to a Company with custom fields agent_code, commission_pct, can_cancel, commission_on_fees, allow_agent_collected, portal_enabled.\n\n**Login:** 6-digit code emailed via GHL, hashed in workflow static data (production executions only).\n\n**Secrets:** token secret lives in the Config block of each Code node; RCM token credentials in Get RCM Token. Neither is in GitHub.\n\nSource: github repo wakacampa-agent-portal, n8n/src. Rebuild with scripts/build-n8n.js rather than hand-editing Code nodes.`)}, [], { color: 4, position: [0, -40], width: 420, height: 380 });
+const notes = sticky(${J(`## ${E.name}\nOur replacement for the RCM Agent API. One endpoint: POST {"method": ...} with a Bearer session token.\n\n**Phase 1 (this version):** pricing, availability, the booking and cancellation go through RCM's v3.2 Web Booking API (apikey + HMAC) as Waka Campa, with no RCM agent: the agency is written into the booking notes, and commission comes from the agency's GHL record. bookinginfo uses RCM's Post-Booking API (token). RCM stays the single inventory. GHL holds agent identity and the agency's booking register.\n\n**Agents:** GHL Contact tagged agent_user, linked to a Company with custom fields agent_code, commission_pct, can_cancel, commission_on_fees, allow_agent_collected, portal_enabled.\n\n**Login:** 6-digit code emailed via GHL, hashed in workflow static data (production executions only).\n\n**Secrets:** token secret lives in the Config block of each Code node; RCM token credentials in Get RCM Token. Neither is in GitHub.\n\nSource: github repo wakacampa-agent-portal, n8n/src. Rebuild with scripts/build-n8n.js rather than hand-editing Code nodes.`)}, [], { color: 4, position: [0, -40], width: 420, height: 380 });
 
 export default workflow(${J(E.name)}, ${J(E.name)})
   .add(notes)
