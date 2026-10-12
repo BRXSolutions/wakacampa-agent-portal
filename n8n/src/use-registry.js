@@ -71,8 +71,10 @@ if (ctx.method === 'cancelbooking') {
   if (b.status === 'cancelled') return respond(null, 'Booking is already cancelled');
   if (!params.reasonid) return respond(null, 'reasonid is required');
   const body = { method: 'cancelbooking', reservationref: b.reservationRef, reasonid: Number(params.reasonid) };
+  /* Older bookings were made under the agent in RCM, and RCM only finds those with the agent code. */
+  if (b.rcmMode !== 'direct') body.agentcode = b.agentCode || agency.agentCode;
   if (params.cancelfeeid) body.cancelfeeid = Number(params.cancelfeeid);
-  return [{ json: { route: 'rcm', api: 'post', post: 'cancel', method: 'cancelbooking', rcmBody: body, agency, user: ctx.user, booking: b } }];
+  return [{ json: { route: 'rcm', api: 'web', post: 'cancel', method: 'cancelbooking', rcmBody: body, agency, user: ctx.user, booking: b } }];
 }
 
 return respond(null, 'Unsupported method');
