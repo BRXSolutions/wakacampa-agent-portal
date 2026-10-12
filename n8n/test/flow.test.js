@@ -72,25 +72,32 @@ test('requests without a valid session get 401', () => {
 
 const auth = () => ({ authorization: 'Bearer ' + token });
 
-test('reads are proxied with the agency code forced', () => {
+test('reads go to RCM as Waka Campa: no agent code, even if the caller sends one', () => {
   const r = run('route-request.js', [{ json: { headers: auth(), body: { method: 'step2', agentcode: 'HACKER', pickuplocationid: 1 } } }], {});
   assert.equal(r[0].json.route, 'rcm');
-  assert.equal(r[0].json.rcmBody.agentcode, 'KIWI1');
+  assert.equal(r[0].json.rcmBody.agentcode, undefined);
   const s1 = run('route-request.js', [{ json: { headers: auth(), body: JSON.stringify({ method: 'step1' }) } }], {});
   assert.equal(s1[0].json.rcmBody.method, 'step1');
   assert.equal(s1[0].json.rcmBody.agentcode, undefined);
 });
 
 let saved;
-test('booking: validated, agent fields forced, RCM reply becomes a register record', () => {
+test('booking: validated, booked as Waka Campa with the agency in the notes, RCM reply becomes a register record', () => {
   const body = { method: 'booking', bookingtype: 2, vehiclecategoryid: 101, pickuplocationid: 1, dropofflocationid: 1, pickupdate: '09/11/2026', pickuptime: '10:00', dropoffdate: '14/11/2026', dropofftime: '10:00', agentcollectedamount: 500, agentrefno: 'KT-77', customer: { firstname: 'Ana', lastname: 'Test', email: 'ana@wakacampa.com' }, displaypickup: 'Auckland', displaydropoff: 'Auckland', displaycategory: '2 Berth', expectedtotal: 900 };
   const r = run('route-request.js', [{ json: { headers: auth(), body } }], {});
   const ctx = r[0].json;
   assert.equal(ctx.post, 'booking');
-  assert.equal(ctx.rcmBody.agentcode, 'KIWI1');
-  assert.equal(ctx.rcmBody.agentname, 'Sam Lee');
-  assert.equal(ctx.rcmBody.agentcollectedamount, undefined, 'not allowed for this agency');
+  assert.equal(ctx.rcmBody.agentcode, undefined);
+  assert.equal(ctx.rcmBody.agentname, undefined);
+  assert.equal(ctx.rcmBody.agentrefno, undefined);
+  assert.equal(ctx.rcmBody.agentcollectedamount, undefined);
+  assert.equal(ctx.rcmBody.remark, 'Agent booking: Kiwi Tours (KIWI1). Agent ref KT-77. Booked by Sam Lee.');
+  assert.equal(ctx.agent.refNo, 'KT-77');
+  const withNotes = run('route-request.js', [{ json: { headers: auth(), body: { ...body, remark: 'Late arrival' } } }], {})[0].json;
+  assert.match(withNotes.rcmBody.remark, /Booked by Sam Lee\. Notes: Late arrival$/);
   assert.equal(ctx.rcmBody.displaypickup, undefined);
+  const realHirer = run('route-request.js', [{ json: { headers: auth(), body: { ...body, customer: { lastname: 'X', email: 'someone@gmail.com' } } } }], {});
+  assert.match(realHirer[0].json.response.error, /@wakacampa.com/);
   const noCust = run('route-request.js', [{ json: { headers: auth(), body: { ...body, customer: { lastname: 'X' } } } }], {});
   assert.equal(noCust[0].json.response.status, 'ERR');
 
@@ -103,6 +110,10 @@ test('booking: validated, agent fields forced, RCM reply becomes a register reco
   const j = JSON.parse(p.booking_json);
   assert.equal(j.agencyId, 'co_9');
   assert.equal(j.total, 900);
+  assert.equal(j.rcmMode, 'direct');
+  assert.equal(j.agentRefNo, 'KT-77');
+  assert.equal(j.commissionPct, 15);
+  assert.equal(j.commission, 135);
 
   const failed = run('shape-rcm-reply.js', [{ json: { status: 'ERR', error: 'Vehicle not available' } }], { 'Prepare RCM Call': [{ json: ctx }] });
   assert.equal(failed[0].json.response.error, 'Vehicle not available');
@@ -121,11 +132,21 @@ test('agentbookings only lists this agency, bookinginfo and cancel check ownersh
 
   const info = run('use-registry.js', pages, { 'Route Request': [ctxFor('bookinginfo', { reservationref: 'REF123' })] });
   assert.equal(info[0].json.route, 'rcm');
+  const infoShaped = run('shape-rcm-reply.js', [{ json: { status: 'OK', results: [{ bookinginfo: [{ totalcost: 1000, agentcommission: 0, agentnetamountdue: 0 }], customerinfo: [{}] }] } }], { 'Prepare RCM Call': [info[0]] });
+  const bi = infoShaped[0].json.response.results[0].bookinginfo[0];
+  assert.equal(bi.agentcommission, 150, 'commission from our agency record, on RCM total');
+  assert.equal(bi.agentnetamountdue, 850);
+  assert.equal(bi.agentrefno, 'KT-77');
   const notMine = run('use-registry.js', pages, { 'Route Request': [ctxFor('bookinginfo', { reservationref: 'REF999' })] });
   assert.equal(notMine[0].json.response.error, 'Booking not found');
 
   const cancel = run('use-registry.js', pages, { 'Route Request': [ctxFor('cancelbooking', { reservationref: 'REF123', reasonid: 2 })] });
   assert.equal(cancel[0].json.rcmBody.method, 'cancelbooking');
+  assert.equal(cancel[0].json.api, 'web');
+  assert.equal(cancel[0].json.rcmBody.agentcode, undefined, 'direct bookings cancel as Waka Campa');
+  const legacy = { id: 'rec_4', properties: { booking_json: JSON.stringify({ ...JSON.parse(saved.properties.booking_json), rcmMode: undefined, reservationRef: 'REF555' }) } };
+  const legacyCancel = run('use-registry.js', [{ json: { records: [legacy] } }], { 'Route Request': [ctxFor('cancelbooking', { reservationref: 'REF555', reasonid: 2 })] });
+  assert.equal(legacyCancel[0].json.rcmBody.agentcode, 'KIWI1', 'older agent bookings still cancel with the agent code');
   const shaped = run('shape-rcm-reply.js', [{ json: { status: 'OK', results: { success: true, successmsg: 'OK', reservationref: 'REF123' } } }], { 'Prepare RCM Call': [cancel[0]] });
   assert.equal(shaped[0].json.route, 'mark_cancelled');
   assert.equal(shaped[0].json.recordId, 'rec_1');
