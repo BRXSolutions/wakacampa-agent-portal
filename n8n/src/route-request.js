@@ -48,10 +48,9 @@ if (method === 'me') {
   return respond([{ agency: agency.name, agentcode: agency.agentCode, commissionpct: Number(agency.commissionPct || 0), cancancel: agency.canCancel !== false, user }]);
 }
 
-/* Reads that go straight to the booking engine. agentcode is always the agency's, never the caller's. */
+/* Reads that go straight to the booking engine. RCM sees Waka Campa, never an agent: any agentcode from the caller is dropped. */
 const PROXY = ['step1', 'vehiclecategorylocations', 'step2', 'search', 'step3', 'select', 'calctotal', 'locations', 'locationdetails',
   'categorytypes', 'categorylist', 'driverages', 'countries', 'cancelreasons', 'donotrent', 'packages', 'relocationspecials', 'customfields'];
-const AGENT_PRICED = ['step2', 'search', 'step3', 'select', 'packages'];
 
 const clean = (p) => {
   const o = {};
@@ -61,7 +60,6 @@ const clean = (p) => {
 
 if (PROXY.includes(method)) {
   const p = clean(params);
-  if (AGENT_PRICED.includes(method)) p.agentcode = agency.agentCode;
   return [{ json: { route: 'rcm', api: 'web', post: 'plain', method, rcmBody: Object.assign({ method }, p), agency, user } }];
 }
 
@@ -73,17 +71,22 @@ if (method === 'booking' || method === 'savebooking') {
     return respond(null, 'customer.lastname and a valid customer.email are required');
   }
   if (![1, 2].includes(Number(p.bookingtype || 2))) return respond(null, 'bookingtype must be 1 (quote) or 2 (booking)');
+  /* Staging shares the live RCM: only test hirers (@wakacampa.com) may be booked from here. */
+  if (CONFIG.env !== 'live' && !/@wakacampa\.com$/i.test(String(customer.email).trim())) {
+    return respond(null, 'Staging only accepts test bookings: the hirer email must end in @wakacampa.com');
+  }
   p.customer = customer;
   p.bookingtype = Number(p.bookingtype || 2);
-  p.agentcode = agency.agentCode;
-  p.agentname = String(user.name || '').slice(0, 20);
-  p.agentemail = String(user.email || '').slice(0, 50);
-  if (!agency.allowCollected) delete p.agentcollectedamount;
+  /* Booked in RCM as a Waka Campa booking. The agency is recorded in the booking notes and in our own register. */
+  const agent = { name: String(user.name || ''), email: String(user.email || ''), refNo: String(p.agentrefno || '').slice(0, 50) };
+  ['agentname', 'agentemail', 'agentrefno', 'agentcollectedamount', 'campaigncode', 'referralid'].forEach(k => delete p[k]);
+  const label = `Agent booking: ${agency.name} (${agency.agentCode})${agent.refNo ? '. Agent ref ' + agent.refNo : ''}. Booked by ${agent.name || agent.email}.`;
+  p.remark = (label + (p.remark ? ' Notes: ' + String(p.remark) : '')).slice(0, 250);
   const display = {
     pickup: String(params.displaypickup || ''), dropoff: String(params.displaydropoff || ''),
     category: String(params.displaycategory || ''), total: Number(params.expectedtotal || 0)
   };
-  return [{ json: { route: 'rcm', api: 'web', post: 'booking', method, rcmBody: Object.assign({ method: 'booking' }, p), agency, user, display } }];
+  return [{ json: { route: 'rcm', api: 'web', post: 'booking', method, rcmBody: Object.assign({ method: 'booking' }, p), agency, user, agent, display } }];
 }
 
 if (['agentbookings', 'bookinginfo', 'cancelbooking'].includes(method)) {
