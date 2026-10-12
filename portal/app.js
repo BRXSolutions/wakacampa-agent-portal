@@ -334,8 +334,8 @@
           </div>
           <div><label>Notes for Waka Campa</label><textarea name="remark" maxlength="250" rows="3">${esc(c.remark)}</textarea></div>
           <div class="grid grid-2">
-            <label class="option"><input type="radio" name="bookingtype" value="2" ${c.bookingtype !== '1' ? 'checked' : ''}><span class="grow"><strong>Book now</strong><br><span class="small muted">Holds the vehicle</span></span></label>
-            <label class="option"><input type="radio" name="bookingtype" value="1" ${c.bookingtype === '1' ? 'checked' : ''}><span class="grow"><strong>Save as quote</strong><br><span class="small muted">Valid ${esc(loc.quoteisvalid_numberofdays || 7)} days, not held</span></span></label>
+            <label class="option"><input type="radio" name="bookingtype" value="2" ${c.bookingtype !== '1' ? 'checked' : ''}><span class="grow"><strong>Make a reservation</strong><br><span class="small muted">Holds the vehicle</span></span></label>
+            <label class="option"><input type="radio" name="bookingtype" value="1" ${c.bookingtype === '1' ? 'checked' : ''}><span class="grow"><strong>Save as quotation</strong><br><span class="small muted">Valid ${esc(loc.quoteisvalid_numberofdays || 7)} days, not held</span></span></label>
           </div>
           <div id="book-msg"></div>
           <div class="actions"><button class="btn secondary" type="button" onclick="location.hash='#/extras'">Back</button><button class="btn" type="submit" id="book-btn">Confirm</button></div>
@@ -384,7 +384,7 @@
       <form id="f-find" class="card grid grid-4" style="align-items:end">
         <div><label>Made from</label><input type="date" name="from" value="${esc(start)}"></div>
         <div><label>Made to</label><input type="date" name="to" value="${esc(end)}"></div>
-        <div><label>Status</label><select name="status">${['all', 'confirmed', 'onrequest', 'cancelled'].map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${{ all: 'All', confirmed: 'Confirmed', onrequest: 'On request', cancelled: 'Cancelled' }[s]}</option>`).join('')}</select></div>
+        <div><label>Status</label><select name="status">${['all', 'confirmed', 'onrequest', 'cancelled'].map(s => `<option value="${s}" ${s === status ? 'selected' : ''}>${{ all: 'All', confirmed: 'Reservation', onrequest: 'Reservation Request', cancelled: 'Cancelled' }[s]}</option>`).join('')}</select></div>
         <div class="actions" style="justify-content:flex-start"><button class="btn" type="submit">Show</button></div>
         <div style="grid-column:1/-1"><label>Or find by booking number</label><input name="no" inputmode="numeric" placeholder="e.g. 50012" value="${esc(query.get('no') || '')}"></div>
       </form>
@@ -400,7 +400,7 @@
     try {
       const rows = await api.call('agentbookings', params);
       if (!rows.length) { list.innerHTML = '<p class="muted" style="margin:0">No bookings found.</p>'; return; }
-      const badge = (r) => r.isquotation ? '<span class="badge muted">Quote</span>' : r.bookingstatus === 'CANCELLED' ? '<span class="badge bad">Cancelled</span>' : r.bookingstatus === 'ONREQUEST' ? '<span class="badge warn">On request</span>' : '<span class="badge">Confirmed</span>';
+      const badge = (r) => r.bookingstatus === 'CANCELLED' ? '<span class="badge bad">Cancelled</span>' : r.isquotation ? '<span class="badge muted">Quotation</span>' : r.bookingstatus === 'ONREQUEST' ? '<span class="badge warn">Reservation Request</span>' : '<span class="badge">Reservation</span>';
       list.innerHTML = `<div class="table-wrap"><table class="list"><thead><tr><th>Booking</th><th>Hirer</th><th>Vehicle</th><th>Pick-up</th><th>Drop-off</th><th>Your ref</th><th>Status</th><th style="text-align:right">Total</th></tr></thead><tbody>
         ${rows.map(r => `<tr class="clickable" data-ref="${esc(r.reservationref)}"><td><strong>${esc(r.reservationno)}</strong></td><td>${esc(r.firstname)} ${esc(r.lastname)}</td><td>${esc(r.vehiclecategory || '')}</td><td>${esc(r.pickuplocationcode)} ${esc(r.pickupdate)}</td><td>${esc(r.dropofflocationcode)} ${esc(r.dropoffdate)}</td><td>${esc(r.agentrefno || '')}</td><td>${badge(r)}</td><td style="text-align:right">${r.totalcost !== undefined ? money(r.totalcost) : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
@@ -427,12 +427,12 @@
     const c = info.customerinfo[0] || {};
     const isNew = query.get('new') === '1';
     const cancelled = b.reservationstatus === 'Cancelled';
-    const statusBadge = cancelled ? '<span class="badge bad">Cancelled</span>' : b.isquotation ? '<span class="badge muted">Quote</span>' : b.isonrequest ? '<span class="badge warn">On request</span>' : '<span class="badge">Confirmed</span>';
+    const statusBadge = cancelled ? '<span class="badge bad">Cancelled</span>' : b.isquotation ? '<span class="badge muted">Quotation</span>' : b.isonrequest ? '<span class="badge warn">Reservation Request</span>' : '<span class="badge">Reservation</span>';
     const p = api.profile() || {};
     app.innerHTML = `
-      ${isNew ? `<div class="alert good" style="margin-bottom:16px">${b.isquotation ? 'Quote saved' : 'Booking confirmed'}. Booking number <strong>${esc(b.reservationno)}</strong>.</div>` : ''}
+      ${isNew ? `<div class="alert good" style="margin-bottom:16px">${b.isquotation ? 'Quotation saved' : 'Reservation made'}. Reservation number <strong>${esc(b.reservationno)}</strong>.</div>` : ''}
       <div class="page-head">
-        <div><h1>Booking ${esc(b.reservationno)} ${statusBadge}</h1><p class="muted">${esc(c.firstname)} ${esc(c.lastname)} · made ${esc(b.reservationcreateddate)}${b.agentrefno ? ' · your ref ' + esc(b.agentrefno) : ''}</p></div>
+        <div><h1>Reservation ${esc(b.reservationno)} ${statusBadge}</h1><p class="muted">${esc(c.firstname)} ${esc(c.lastname)} · made ${esc(b.reservationcreateddate)}${b.agentrefno ? ' · your ref ' + esc(b.agentrefno) : ''}</p></div>
         <div class="actions">${!cancelled ? '<button class="btn secondary" id="cancel-btn">Cancel booking</button>' : ''}<button class="btn secondary" onclick="window.print()">Print</button></div>
       </div>
       <div class="layout-2">
