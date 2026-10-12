@@ -327,7 +327,7 @@
             <div><label>Licence issued in</label><input name="licenseissued" value="${esc(c.licenseissued)}" maxlength="20"></div>
           </div>
           <div class="grid grid-2">
-            <div><label>Your reference</label><input name="agentrefno" value="${esc(c.agentrefno)}" maxlength="50"><div class="field-hint">Shown on invoices and in My bookings.</div></div>
+            <div><label>Your reference</label><input name="agentrefno" value="${esc(c.agentrefno)}" maxlength="50"><div class="field-hint">Saved with the booking and shown in My bookings.</div></div>
             <div><label>Number travelling</label><input type="number" min="1" max="12" name="numbertravelling" value="${esc(c.numbertravelling || '')}"></div>
             <div><label>Arrival flight${loc.isflightinrequired ? ' (required)' : ''}</label><input name="flightin" value="${esc(c.flightin)}" maxlength="50" ${loc.isflightinrequired ? 'required' : ''}></div>
             <div><label>Departure flight</label><input name="flightout" value="${esc(c.flightout)}" maxlength="50"></div>
@@ -412,8 +412,9 @@
   }
 
   /* ---------------- booking detail + cancel ---------------- */
-    async function viewBooking(ref, query) {
+  async function viewBooking(ref, query) {
     loading('Loading booking');
+    /* A just-made booking can take a few seconds to show in GHL's search, so retry briefly. */
     let info;
     for (let attempt = 0; ; attempt++) {
       try { info = (await api.call('bookinginfo', { reservationref: ref }))[0]; break; }
