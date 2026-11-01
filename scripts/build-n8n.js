@@ -50,7 +50,7 @@ const header = read('n8n/src/header.js')
 /* Only the nodes that sign or verify need the auth helpers; comments are stripped to keep nodes small. */
 const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/\n\s*\n+/g, '\n');
 const liteHeader = header.replace(/const AUTH = \(function[\s\S]*?return module\.exports; \}\)\(\);\n/, '');
-const NEEDS_AUTH = ['route-request.js', 'issue-login-code.js', 'prepare-rcm-call.js'];
+const NEEDS_AUTH = ['route-request.js', 'issue-login-code.js', 'prepare-rcm-call.js', 'prepare-collected-payment.js'];
 const code = (file) => strip((NEEDS_AUTH.includes(file) ? header : liteHeader) + '\n' + read('n8n/src/' + file));
 
 const J = (v) => JSON.stringify(v);
@@ -230,19 +230,63 @@ const afterRcm = switchCase({
   version: 3.4,
   config: { name: 'After RCM', position: [2464, 400], parameters: { mode: 'rules', rules: { values: [
     { renameOutput: true, outputKey: 'respond', conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' }, combinator: 'and', conditions: [{ leftValue: expr('{{ $json.route }}'), rightValue: 'respond', operator: { type: 'string', operation: 'equals' } }] } },
-    { renameOutput: true, outputKey: 'save', conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' }, combinator: 'and', conditions: [{ leftValue: expr('{{ $json.route }}'), rightValue: 'save', operator: { type: 'string', operation: 'equals' } }] } },
+    { renameOutput: true, outputKey: 'save', conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' }, combinator: 'and', conditions: [{ leftValue: expr('{{ $json.route }}'), rightValue: 'collect', operator: { type: 'string', operation: 'equals' } }] } },
     { renameOutput: true, outputKey: 'cancelled', conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' }, combinator: 'and', conditions: [{ leftValue: expr('{{ $json.route }}'), rightValue: 'mark_cancelled', operator: { type: 'string', operation: 'equals' } }] } }
   ] }, options: {} } }
 });
 
+/* ---------- agent collected payment (RCM's agent rule, recorded as an Account/Chq payment) ---------- */
+const getRcmTokenForBooking = node({
+  type: 'n8n-nodes-base.httpRequest', version: 4.4,
+  config: { name: 'Get RCM Token (booking)', position: [2688, 560], executeOnce: true, retryOnFail: true,
+    parameters: { method: 'POST', url: 'https://api.rentalcarmanager.com/v32/token',
+      sendHeaders: true, headerParameters: { parameters: [{ name: 'Accept', value: 'application/json' }] },
+      sendBody: true, contentType: 'form-urlencoded',
+      bodyParameters: { parameters: [{ name: 'username', value: ${J(RCM_USER)} }, { name: 'password', value: ${J(RCM_PASS)} }, { name: 'grant_type', value: 'password' }] },
+      options: { timeout: 30000 } } },
+  output: [{ access_token: 't' }]
+});
+
+const getBookingTotals = node({
+  type: 'n8n-nodes-base.httpRequest', version: 4.4,
+  config: { name: 'Get Booking Totals', position: [2912, 560], alwaysOutputData: true, onError: 'continueRegularOutput', retryOnFail: true,
+    parameters: { method: 'POST', url: 'https://api.rentalcarmanager.com/v32/api',
+      sendHeaders: true, headerParameters: { parameters: [{ name: 'authorization', value: expr('Bearer {{ $json.access_token }}') }] },
+      sendBody: true, contentType: 'raw', rawContentType: 'application/json', body: expr('{{ $("After RCM").first().json.bookinginfoBody }}'),
+      options: { timeout: 45000, response: { response: { neverError: true } } } } },
+  output: [{ status: 'OK', results: [{ bookinginfo: [{ totalcost: 1000 }], rateinfo: [{ ratesubtotal: 800 }] }] }]
+});
+
+const prepareCollectedPayment = node({
+  type: 'n8n-nodes-base.code', version: 2,
+  config: { name: 'Prepare Collected Payment', position: [3136, 560], parameters: { mode: 'runOnceForAllItems', jsCode: ${J(code('prepare-collected-payment.js'))} } },
+  output: [{ pay: true, bodyString: '{}', signature: 'x', properties: {}, reply: [], collected: 40 }]
+});
+
+const collectedToRecord = ifElse({
+  version: 2.3,
+  config: { name: 'Collected To Record?', position: [3360, 560], parameters: { conditions: { options: { caseSensitive: true, leftValue: '', typeValidation: 'loose' }, combinator: 'and',
+    conditions: [{ leftValue: expr('{{ $json.pay }}'), rightValue: true, operator: { type: 'boolean', operation: 'true', singleValue: true } }] }, looseTypeValidation: true } }
+});
+
+const recordCollectedPayment = node({
+  type: 'n8n-nodes-base.httpRequest', version: 4.4,
+  config: { name: 'Record Collected Payment', position: [3584, 480], alwaysOutputData: true, onError: 'continueRegularOutput',
+    parameters: { method: 'POST', url: ${J('https://apis.rentalcarmanager.com/booking/v3.2/?apikey=' + RCM_USER)},
+      sendHeaders: true, headerParameters: { parameters: [{ name: 'signature', value: expr('{{ $json.signature }}') }] },
+      sendBody: true, contentType: 'raw', rawContentType: 'application/json', body: expr('{{ $json.bodyString }}'),
+      options: { timeout: 45000, response: { response: { neverError: true } } } } },
+  output: [{ status: 'OK', results: { paymentsaved: true } }]
+});
+
 const saveAgentBooking = node({
   type: 'n8n-nodes-base.httpRequest', version: 4.4,
-  config: { name: 'Save Agent Booking', position: [2688, 560], alwaysOutputData: true, onError: 'continueRegularOutput', retryOnFail: true,
+  config: { name: 'Save Agent Booking', position: [3808, 560], alwaysOutputData: true, onError: 'continueRegularOutput', retryOnFail: true,
     credentials: ghlCred,
     parameters: { method: 'POST', url: ${J(GHL + '/objects/custom_objects.bookings/records')}, authentication: 'genericCredentialType', genericAuthType: 'httpHeaderAuth',
       sendHeaders: true, headerParameters: { parameters: [{ name: 'Version', value: '2021-07-28' }] },
       sendBody: true, specifyBody: 'json',
-      jsonBody: expr('{{ JSON.stringify({ locationId: ${J(E.locationId)}, properties: $json.properties }) }}'),
+      jsonBody: expr('{{ JSON.stringify({ locationId: ${J(E.locationId)}, properties: $("Prepare Collected Payment").first().json.properties }) }}'),
       options: { timeout: 30000 } } },
   output: [{ record: { id: 'r1' } }]
 });
@@ -261,20 +305,20 @@ const markBookingCancelled = node({
 
 const writeReply = node({
   type: 'n8n-nodes-base.code', version: 2,
-  config: { name: 'Write Reply', position: [2912, 640], parameters: { mode: 'runOnceForAllItems',
-    jsCode: ${J("const w = ($input.first() || {}).json || {};\nconst src = $('After RCM').first().json;\nconst ok = !!(w.record && w.record.id) || !!w.id;\nconst issues = ok ? [] : ['Saved in the booking system but not yet in the agent register; Waka Campa has been alerted.'];\nif (!ok) console.log('Agent register write failed for ' + JSON.stringify(src.reply) + ': ' + JSON.stringify(w).slice(0, 400));\nreturn [{ json: { httpStatus: 200, response: { status: 'OK', error: '', results: src.reply, issues, ms: 0 }, registerFailed: !ok } }];")} } },
+  config: { name: 'Write Reply', position: [4032, 640], parameters: { mode: 'runOnceForAllItems',
+    jsCode: ${J("const w = ($input.first() || {}).json || {};\nconst src = $('Shape RCM Reply').first().json;\nconst ok = !!(w.record && w.record.id) || !!w.id;\nconst issues = ok ? [] : ['Saved in the booking system but not yet in the agent register; Waka Campa has been alerted.'];\nlet pay = null;\ntry { pay = $('Record Collected Payment').first().json; } catch (e) { pay = null; }\nif (pay && !(pay.status === 'OK' && pay.results && pay.results.paymentsaved)) { issues.push('Reservation made, but the agent collected payment was not recorded in RCM; Waka Campa has been alerted.'); console.log('Collected payment failed: ' + JSON.stringify(pay).slice(0, 400)); }\nif (!ok) console.log('Agent register write failed for ' + JSON.stringify(src.reply) + ': ' + JSON.stringify(w).slice(0, 400));\nreturn [{ json: { httpStatus: 200, response: { status: 'OK', error: '', results: src.reply, issues, ms: 0 }, registerFailed: !ok } }];")} } },
   output: [{ httpStatus: 200, response: { status: 'OK' } }]
 });
 
 const sendWriteResponse = node({
   type: 'n8n-nodes-base.respondToWebhook', version: 1.5,
-  config: { name: 'Send Write Response', position: [3136, 640], parameters: {
+  config: { name: 'Send Write Response', position: [4256, 640], parameters: {
     respondWith: 'json', responseBody: expr('{{ JSON.stringify($json.response) }}'),
     options: { responseCode: 200, responseHeaders: { entries: [{ name: 'Access-Control-Allow-Origin', value: '*' }, { name: 'Cache-Control', value: 'no-store' }] } }
   } }
 });
 
-const notes = sticky(${J(`## ${E.name}\nOur replacement for the RCM Agent API. One endpoint: POST {"method": ...} with a Bearer session token.\n\n**Phase 1 (this version):** pricing, availability, the booking and cancellation go through RCM's v3.2 Web Booking API (apikey + HMAC) as Waka Campa, with no RCM agent: the agency is written into the booking notes, and commission comes from the agency's GHL record. bookinginfo uses RCM's Post-Booking API (token). RCM stays the single inventory. GHL holds agent identity and the agency's booking register.\n\n**Agents:** GHL Contact tagged agent_user, linked to a Company with custom fields agent_code, commission_pct, can_cancel, commission_on_fees, allow_agent_collected, portal_enabled.\n\n**Login:** 6-digit code emailed via GHL, hashed in workflow static data (production executions only).\n\n**Secrets:** token secret lives in the Config block of each Code node; RCM token credentials in Get RCM Token. Neither is in GitHub.\n\nSource: github repo wakacampa-agent-portal, n8n/src. Rebuild with scripts/build-n8n.js rather than hand-editing Code nodes.`)}, [], { color: 4, position: [0, -40], width: 420, height: 380 });
+const notes = sticky(${J(`## ${E.name}\nOur replacement for the RCM Agent API. One endpoint: POST {"method": ...} with a Bearer session token.\n\n**Phase 1 (this version):** pricing, availability, the booking and cancellation go through RCM's v3.2 Web Booking API (apikey + HMAC) as Waka Campa, with no RCM agent: the agency is written into the booking notes, and commission comes from the agency's GHL record. After each reservation the agent's collected amount (commission % x rental, RCM's agent rule) is recorded in RCM as an Account/Chq payment, source 'Agent collected - <agency>'. bookinginfo uses RCM's Post-Booking API (token). RCM stays the single inventory. GHL holds agent identity and the agency's booking register.\n\n**Agents:** GHL Contact tagged agent_user, linked to a Company with custom fields agent_code, commission_pct, can_cancel, commission_on_fees, allow_agent_collected, portal_enabled.\n\n**Login:** 6-digit code emailed via GHL, hashed in workflow static data (production executions only).\n\n**Secrets:** token secret lives in the Config block of each Code node; RCM token credentials in Get RCM Token. Neither is in GitHub.\n\nSource: github repo wakacampa-agent-portal, n8n/src. Rebuild with scripts/build-n8n.js rather than hand-editing Code nodes.`)}, [], { color: 4, position: [0, -40], width: 420, height: 380 });
 
 export default workflow(${J(E.name)}, ${J(E.name)})
   .add(notes)
@@ -288,7 +332,9 @@ export default workflow(${J(E.name)}, ${J(E.name)})
     .onCase(2, prepareRcmCall.to(whichRcmApi
       .onTrue(getRcmToken.to(callRcm.to(shapeRcmReply.to(afterRcm
         .onCase(0, sendResponse)
-        .onCase(1, saveAgentBooking.to(writeReply.to(sendWriteResponse)))
+        .onCase(1, getRcmTokenForBooking.to(getBookingTotals.to(prepareCollectedPayment.to(collectedToRecord
+          .onTrue(recordCollectedPayment.to(saveAgentBooking.to(writeReply.to(sendWriteResponse))))
+          .onFalse(saveAgentBooking)))))
         .onCase(2, markBookingCancelled.to(writeReply))))))
       .onFalse(callRcmWeb.to(shapeRcmReply))))
     .onCase(3, loadAgentBookings.to(useRegistry.to(registryNeedsRcm
