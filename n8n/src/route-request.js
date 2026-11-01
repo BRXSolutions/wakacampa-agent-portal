@@ -79,12 +79,16 @@ if (method === 'booking' || method === 'savebooking') {
   p.bookingtype = Number(p.bookingtype || 2);
   /* Booked in RCM as a Waka Campa booking. The agency is recorded in the booking notes and in our own register. */
   const agent = { name: String(user.name || ''), email: String(user.email || ''), refNo: String(p.agentrefno || '').slice(0, 50) };
+  /* Like RCM's "API: Allow define Collected Amt": only agencies allowed to may set their own collected amount. */
+  if (agency.allowCollected && p.agentcollectedamount !== undefined && p.agentcollectedamount !== '' && isFinite(Number(p.agentcollectedamount))) agent.collected = Number(p.agentcollectedamount);
   ['agentname', 'agentemail', 'agentrefno', 'agentcollectedamount', 'campaigncode', 'referralid'].forEach(k => delete p[k]);
-  const label = `Agent booking: ${agency.name} (${agency.agentCode})${agent.refNo ? '. Agent ref ' + agent.refNo : ''}. Booked by ${agent.name || agent.email}.`;
+  const agencyLabel = String(agency.name).toUpperCase().includes('(' + String(agency.agentCode).toUpperCase() + ')') ? agency.name : `${agency.name} (${agency.agentCode})`;
+  const label = `Agent booking: ${agencyLabel}${agent.refNo ? '. Agent ref ' + agent.refNo : ''}. Booked by ${agent.name || agent.email}.`;
   p.remark = (label + (p.remark ? ' Notes: ' + String(p.remark) : '')).slice(0, 250);
   const display = {
     pickup: String(params.displaypickup || ''), dropoff: String(params.displaydropoff || ''),
-    category: String(params.displaycategory || ''), total: Number(params.expectedtotal || 0)
+    category: String(params.displaycategory || ''), total: Number(params.expectedtotal || 0),
+    rental: Number(params.totalrateafterdiscount || 0)
   };
   return [{ json: { route: 'rcm', api: 'web', post: 'booking', method, rcmBody: Object.assign({ method: 'booking' }, p), agency, user, agent, display } }];
 }
