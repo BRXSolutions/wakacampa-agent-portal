@@ -93,6 +93,10 @@ test('booking: validated, booked as Waka Campa with the agency in the notes, RCM
   assert.equal(ctx.rcmBody.agentcollectedamount, undefined);
   assert.equal(ctx.rcmBody.remark, 'Agent booking: Kiwi Tours (KIWI1). Agent ref KT-77. Booked by Sam Lee.');
   assert.equal(ctx.agent.refNo, 'KT-77');
+  staticData.agencies.co_9.name = 'Kiwi Tours (KIWI1)';
+  const named = run('route-request.js', [{ json: { headers: auth(), body } }], {})[0].json;
+  assert.equal(named.rcmBody.remark, 'Agent booking: Kiwi Tours (KIWI1). Agent ref KT-77. Booked by Sam Lee.', 'code not repeated when the name already has it');
+  staticData.agencies.co_9.name = 'Kiwi Tours';
   const withNotes = run('route-request.js', [{ json: { headers: auth(), body: { ...body, remark: 'Late arrival' } } }], {})[0].json;
   assert.match(withNotes.rcmBody.remark, /Booked by Sam Lee\. Notes: Late arrival$/);
   assert.equal(ctx.rcmBody.displaypickup, undefined);
@@ -102,7 +106,9 @@ test('booking: validated, booked as Waka Campa with the agency in the notes, RCM
   assert.equal(noCust[0].json.response.status, 'ERR');
 
   const shaped = run('shape-rcm-reply.js', [{ json: { status: 'OK', error: '', results: { reservationref: 'REF123', reservationno: 5123, customerid: 77 } } }], { 'Prepare RCM Call': [{ json: ctx }] });
-  assert.equal(shaped[0].json.route, 'save');
+  assert.equal(shaped[0].json.route, 'collect');
+  assert.equal(JSON.parse(shaped[0].json.bookinginfoBody).reservationref, 'REF123');
+  assert.equal(shaped[0].json.requestedCollected, null, 'agency may not set its own collected amount');
   const p = shaped[0].json.properties;
   assert.equal(p.booking_number, '5123');
   assert.equal(p.pickupdate, '2026-11-09');
@@ -113,7 +119,36 @@ test('booking: validated, booked as Waka Campa with the agency in the notes, RCM
   assert.equal(j.rcmMode, 'direct');
   assert.equal(j.agentRefNo, 'KT-77');
   assert.equal(j.commissionPct, 15);
-  assert.equal(j.commission, 135);
+
+  /* RCM's agent rule: collected = commission % x rental (not fees). WCT in RCM: 5% of $1,395 = $69.75. */
+  const rcmTotals = { status: 'OK', results: [{ bookinginfo: [{ totalcost: 2094 }], rateinfo: [{ ratesubtotal: 1395 }] }] };
+  const wctAfter = { ...shaped[0].json, booking: { ...shaped[0].json.booking, commissionPct: 5 } };
+  const pay = run('prepare-collected-payment.js', [{ json: rcmTotals }], { 'After RCM': [{ json: wctAfter }] })[0].json;
+  assert.equal(pay.collected, 69.75);
+  assert.equal(pay.pay, true);
+  const payBody = JSON.parse(pay.bodyString);
+  assert.equal(payBody.method, 'confirmpayment');
+  assert.equal(payBody.amount, 69.75);
+  assert.equal(payBody.paytype, 'Account/Chq');
+  assert.equal(payBody.paysource, 'Agent collected - Kiwi Tours');
+  assert.equal(payBody.emailoption, 0);
+  assert.equal(pay.signature, require('node:crypto').createHmac('sha256', 'rcm-secret').update(pay.bodyString).digest('hex'));
+  const bj = JSON.parse(pay.properties.booking_json);
+  assert.equal(bj.commission, 69.75);
+  assert.equal(bj.collected, 69.75);
+  assert.equal(bj.netDue, 2024.25);
+  assert.equal(pay.properties.totalcost.value, 2094);
+  const onFees = run('prepare-collected-payment.js', [{ json: rcmTotals }], { 'After RCM': [{ json: { ...wctAfter, booking: { ...wctAfter.booking, commissionOnFees: true } } }] })[0].json;
+  assert.equal(onFees.collected, 104.7, 'commission on fees uses the whole total');
+  const zero = run('prepare-collected-payment.js', [{ json: rcmTotals }], { 'After RCM': [{ json: { ...wctAfter, booking: { ...wctAfter.booking, commissionPct: 0 } } }] })[0].json;
+  assert.equal(zero.pay, false, 'no commission, no payment');
+  const quote = run('prepare-collected-payment.js', [{ json: rcmTotals }], { 'After RCM': [{ json: { ...wctAfter, booking: { ...wctAfter.booking, isQuotation: true } } }] })[0].json;
+  assert.equal(quote.pay, false, 'no collected payment on a quotation');
+  assert.equal(quote.collected, 69.75, 'commission still worked out for the quote');
+  const own = run('prepare-collected-payment.js', [{ json: rcmTotals }], { 'After RCM': [{ json: { ...wctAfter, allowCollected: true, requestedCollected: 500 } }] })[0].json;
+  assert.equal(own.collected, 500, 'allowed agencies set their own amount');
+  const noRcm = run('prepare-collected-payment.js', [{ json: { status: 'ERR' } }], { 'After RCM': [{ json: { ...wctAfter, rentalEstimate: 1395 } }] })[0].json;
+  assert.equal(noRcm.collected, 69.75, 'falls back to the step3 rental if RCM cannot be read');
 
   const failed = run('shape-rcm-reply.js', [{ json: { status: 'ERR', error: 'Vehicle not available' } }], { 'Prepare RCM Call': [{ json: ctx }] });
   assert.equal(failed[0].json.response.error, 'Vehicle not available');
@@ -132,10 +167,12 @@ test('agentbookings only lists this agency, bookinginfo and cancel check ownersh
 
   const info = run('use-registry.js', pages, { 'Route Request': [ctxFor('bookinginfo', { reservationref: 'REF123' })] });
   assert.equal(info[0].json.route, 'rcm');
-  const infoShaped = run('shape-rcm-reply.js', [{ json: { status: 'OK', results: [{ bookinginfo: [{ totalcost: 1000, agentcommission: 0, agentnetamountdue: 0 }], customerinfo: [{}] }] } }], { 'Prepare RCM Call': [info[0]] });
+  const infoShaped = run('shape-rcm-reply.js', [{ json: { status: 'OK', results: [{ bookinginfo: [{ totalcost: 1000, agentcommission: 0, agentnetamountdue: 0 }], rateinfo: [{ ratesubtotal: 1000 }], customerinfo: [{}] }] } }], { 'Prepare RCM Call': [info[0]] });
   const bi = infoShaped[0].json.response.results[0].bookinginfo[0];
-  assert.equal(bi.agentcommission, 150, 'commission from our agency record, on RCM total');
+  assert.equal(bi.agentcommission, 150, 'commission from our agency record');
   assert.equal(bi.agentnetamountdue, 850);
+  const infoRental = run('shape-rcm-reply.js', [{ json: { status: 'OK', results: [{ bookinginfo: [{ totalcost: 1000 }], rateinfo: [{ ratesubtotal: 800 }], customerinfo: [{}] }] } }], { 'Prepare RCM Call': [info[0]] });
+  assert.equal(infoRental[0].json.response.results[0].bookinginfo[0].agentcommission, 120, 'on the rental only, like RCM');
   assert.equal(bi.agentrefno, 'KT-77');
   const notMine = run('use-registry.js', pages, { 'Route Request': [ctxFor('bookinginfo', { reservationref: 'REF999' })] });
   assert.equal(notMine[0].json.response.error, 'Booking not found');
