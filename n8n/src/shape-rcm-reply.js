@@ -24,7 +24,9 @@ if (ctx.post === 'bookinginfo') {
       /* RCM holds this as a Waka Campa booking, so commission comes from our agency record, on RCM's current total. */
       const pct = Number(ctx.booking.commissionPct || 0);
       const total = Number(bi.totalcost || ctx.booking.total || 0);
-      bi.agentcommission = Math.round(total * pct) / 100;
+      const rental = (Array.isArray(first.rateinfo) ? first.rateinfo : []).reduce((s, r) => s + Number(r.ratesubtotal || 0), 0) || Number(ctx.booking.rental || 0);
+      const base = ctx.booking.commissionOnFees ? total : rental;
+      bi.agentcommission = Math.round(base * pct) / 100;
       bi.agentnetamountdue = Math.round((total - bi.agentcommission) * 100) / 100;
     }
     if (bi.agentcommission === undefined || bi.agentcommission === null) bi.agentcommission = 0;
@@ -71,12 +73,12 @@ if (ctx.post === 'booking') {
     engine: 'rcm-mirror',
     rcmMode: 'direct',
     commissionPct: Number(ctx.agency.commissionPct || 0),
-    commission: Math.round(Number(ctx.display.total || 0) * Number(ctx.agency.commissionPct || 0)) / 100
+    commissionOnFees: !!ctx.agency.commissionOnFees
   };
   const properties = {
     booking_number: String(first.reservationno),
     reservationno: Number(first.reservationno),
-    reservationstatus: 'reservation',
+    reservationstatus: booking.isQuotation ? 'quotation' : 'reservation',
     reservationcreateddate: today,
     pickupdate: booking.pickupDate,
     dropoffdate: booking.dropoffDate,
@@ -88,7 +90,17 @@ if (ctx.post === 'booking') {
     totalcost: { currency: 'default', value: booking.total || 0 },
     booking_json: JSON.stringify(booking)
   };
-  return [{ json: { route: 'save', properties, reply: [{ reservationref: first.reservationref, reservationno: first.reservationno, customerid: first.customerid || '' }] } }];
+  /* Next: read the reservation back from RCM for the exact rental, then record the agent's collected payment. */
+  return [{ json: {
+    route: 'collect',
+    properties,
+    booking,
+    reply: [{ reservationref: first.reservationref, reservationno: first.reservationno, customerid: first.customerid || '' }],
+    bookinginfoBody: JSON.stringify({ method: 'bookinginfo', reservationref: first.reservationref }),
+    allowCollected: !!ctx.agency.allowCollected,
+    requestedCollected: ctx.agent.collected === undefined ? null : ctx.agent.collected,
+    rentalEstimate: ctx.display.rental || 0
+  } }];
 }
 
 if (ctx.post === 'cancel') {
