@@ -26,6 +26,19 @@
   const plusDays = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
   const toRcm = (iso) => { const [y, m, d] = iso.split('-'); return `${d}/${m}/${y}`; };
   const pretty = (iso) => { if (!iso) return ''; const [y, m, d] = iso.split('-'); return `${+d} ${MONTHS[+m - 1]} ${y}`; };
+  /* Vehicle photos come from RCM (step2/step3 imageurl). They are remembered by category name so
+     pages that only know the name (bookings, booking page) can show the same photo. */
+  const IMG_KEY = 'wc_vehicle_images';
+  const imgMap = (() => { let m = {}; try { m = JSON.parse(localStorage.getItem(IMG_KEY) || '{}') || {}; } catch (e) { m = {}; } return Object.assign({}, cfg.vehicleImages || {}, m); })();
+  const normUrl = (u) => { u = String(u || '').trim(); return !u ? '' : u.startsWith('//') ? 'https:' + u : u.replace(/^http:/, 'https:'); };
+  const nameKey = (n) => String(n || '').trim().toLowerCase();
+  function rememberImages(cars) {
+    let changed = false;
+    (cars || []).forEach(c => { const u = normUrl(c.imageurl); if (u && imgMap[nameKey(c.vehiclecategory)] !== u) { imgMap[nameKey(c.vehiclecategory)] = u; changed = true; } });
+    if (changed) { try { localStorage.setItem(IMG_KEY, JSON.stringify(imgMap)); } catch (e) { /* private mode */ } }
+  }
+  const carImg = (car) => normUrl(car && car.imageurl) || imgMap[nameKey(car && car.vehiclecategory)] || '';
+  const photo = (car, cls) => { const u = carImg(car); return u ? `<img class="${cls}" src="${esc(u)}" alt="${esc(car.vehiclecategory || 'Campervan')}" loading="lazy" onerror="this.remove()">` : ''; };
   const locName = (id) => ((state.ref && state.ref.locations.find(l => String(l.id) === String(id))) || {}).location || id;
 
   function toast(msg) {
@@ -175,6 +188,7 @@
     const uniqIssues = Array.from(new Set(locIssues));
     const fees = (id) => (r.mandatoryfees || []).filter(f => String(f.vehiclecategoryid) === String(id));
     const cars = r.availablecars || [];
+    rememberImages(cars);
     const s = state.search;
     box.innerHTML = `
       <div class="muted small">${esc(locName(s.pickuplocationid))} ${esc(pretty(s.pickupdate))} ${esc(s.pickuptime)} → ${esc(locName(s.dropofflocationid))} ${esc(pretty(s.dropoffdate))} ${esc(s.dropofftime)} · ${cars[0] ? cars[0].numberofdays : ''} days</div>
@@ -185,8 +199,10 @@
         const badge = c.available === 2 ? '<span class="badge warn">Only a few left</span>' : c.available === 1 ? '<span class="badge">Available</span>' : `<span class="badge bad">${esc(c.availablemessage)}</span>`;
         return `
         <div class="card car ${c.available ? '' : 'unavailable'}">
+          <div class="car-photo">${photo(c, 'car-img')}</div>
           <div>
             <h3>${esc(c.vehiclecategory)} ${badge}</h3>
+            ${c.categoryfriendlydescription && nameKey(c.categoryfriendlydescription) !== nameKey(c.vehiclecategory) ? `<div class="small muted">${esc(c.categoryfriendlydescription)}</div>` : ''}
             <div class="car-specs"><span>${esc(c.numberofadults)} adults${c.numberofchildren ? ' + ' + esc(c.numberofchildren) + ' children' : ''}</span><span>${esc(c.numberoflargecases)} large bags</span><span>SIPP ${esc(c.sippcode)}</span><span>Min ${esc(c.minimumbookingday)} days</span></div>
             ${c.totaldiscountamount ? `<div class="small" style="color:var(--good)">Includes ${money(c.totaldiscountamount)} discount</div>` : ''}
           </div>
@@ -210,6 +226,7 @@
     if (!state.step3) state.step3 = (await api.call('step3', searchParams({ vehiclecategoryid: state.selected, vehiclecategorytypeid: selectedTypeId() })))[0];
     const r = state.step3;
     const car = r.availablecars[0];
+    rememberImages(r.availablecars);
     const ex = state.extras;
     if (ex.insuranceid === null) ex.insuranceid = String((r.insuranceoptions.find(i => i.isdefault) || r.insuranceoptions[0] || {}).id || '');
     if (ex.extrakmsid === null) ex.extrakmsid = String((r.kmcharges.find(k => k.isdefault) || r.kmcharges[0] || {}).id || '');
@@ -219,6 +236,7 @@
       <div class="page-head"><div><h1>${esc(car.vehiclecategory)}</h1><p class="muted">${esc(car.numberofdays)} days · ${esc(locName(state.search.pickuplocationid))} to ${esc(locName(state.search.dropofflocationid))}</p></div></div>
       <div class="layout-2">
         <div class="stack">
+          ${carImg(car) ? `<div class="hero">${photo(car, 'hero-img')}</div>` : ''}
           ${car.available ? '' : `<div class="alert bad">${esc(car.availablemessage)}</div>`}
           ${r.insuranceoptions.length ? `<div class="card"><h2>Insurance</h2>${r.insuranceoptions.map(i => `
             <label class="option ${String(i.id) === ex.insuranceid ? 'selected' : ''}"><input type="radio" name="ins" value="${esc(i.id)}" ${String(i.id) === ex.insuranceid ? 'checked' : ''}>
@@ -284,7 +302,9 @@
     const body = rows.filter(r => r.type !== 'total' && r.type !== 'country tax').map(r => `<tr><td>${esc(r.name)}${r.qty > 1 ? ' × ' + esc(r.qty) : ''}</td><td>${money(r.total)}</td></tr>`).join('');
     const tax = rows.find(r => r.type === 'country tax');
     const total = rows.find(r => r.type === 'total');
-    return `<h2>Price</h2><table class="lines">${body}
+    const car = (state.step3 && state.step3.availablecars && state.step3.availablecars[0]) || null;
+    const head = car ? `<div class="sum-car">${photo(car, 'sum-img')}<div><strong>${esc(car.vehiclecategory)}</strong><div class="small muted">${esc(car.numberofdays)} days</div></div></div>` : '';
+    return `${head}<h2>Price</h2><table class="lines">${body}
       <tr class="total"><td>Total</td><td>${money(total.total)}</td></tr>
       ${tax ? `<tr class="sub"><td>${esc(tax.name)}</td><td>${money(tax.total)}</td></tr>` : ''}</table>
       ${button ? `<div class="actions" style="margin-top:16px"><button class="btn secondary" onclick="location.hash='#/search'">Back</button>${button}</div>` : ''}`;
@@ -402,7 +422,7 @@
       if (!rows.length) { list.innerHTML = '<p class="muted" style="margin:0">No bookings found.</p>'; return; }
       const badge = (r) => r.bookingstatus === 'CANCELLED' ? '<span class="badge bad">Cancelled</span>' : r.isquotation ? '<span class="badge muted">Quotation</span>' : r.bookingstatus === 'ONREQUEST' ? '<span class="badge warn">Reservation Request</span>' : '<span class="badge">Reservation</span>';
       list.innerHTML = `<div class="table-wrap"><table class="list"><thead><tr><th>Booking</th><th>Hirer</th><th>Vehicle</th><th>Pick-up</th><th>Drop-off</th><th>Your ref</th><th>Status</th><th style="text-align:right">Total</th></tr></thead><tbody>
-        ${rows.map(r => `<tr class="clickable" data-ref="${esc(r.reservationref)}"><td><strong>${esc(r.reservationno)}</strong></td><td>${esc(r.firstname)} ${esc(r.lastname)}</td><td>${esc(r.vehiclecategory || '')}</td><td>${esc(r.pickuplocationcode)} ${esc(r.pickupdate)}</td><td>${esc(r.dropofflocationcode)} ${esc(r.dropoffdate)}</td><td>${esc(r.agentrefno || '')}</td><td>${badge(r)}</td><td style="text-align:right">${r.totalcost !== undefined ? money(r.totalcost) : ''}</td></tr>`).join('')}
+        ${rows.map(r => `<tr class="clickable" data-ref="${esc(r.reservationref)}"><td><strong>${esc(r.reservationno)}</strong></td><td>${esc(r.firstname)} ${esc(r.lastname)}</td><td><span class="veh">${photo(r, 'veh-img')}${esc(r.vehiclecategory || '')}</span></td><td>${esc(r.pickuplocationcode)} ${esc(r.pickupdate)}</td><td>${esc(r.dropofflocationcode)} ${esc(r.dropoffdate)}</td><td>${esc(r.agentrefno || '')}</td><td>${badge(r)}</td><td style="text-align:right">${r.totalcost !== undefined ? money(r.totalcost) : ''}</td></tr>`).join('')}
       </tbody></table></div>`;
       $$('tr[data-ref]', list).forEach(tr => tr.addEventListener('click', () => go('booking/' + encodeURIComponent(tr.dataset.ref))));
     } catch (e) {
@@ -437,7 +457,7 @@
       </div>
       <div class="layout-2">
         <div class="stack">
-          <div class="card"><h2>Trip</h2><dl class="kv">
+          <div class="card">${carImg(b) ? `<div class="hero">${photo(b, 'hero-img')}</div>` : ''}<h2>Trip</h2><dl class="kv">
             <dt>Vehicle</dt><dd>${esc(b.vehiclecategory)}</dd>
             <dt>Pick-up</dt><dd>${esc(b.pickuplocationname)}, ${esc(b.pickupdate)} ${esc(b.pickuptime)}</dd>
             <dt>Drop-off</dt><dd>${esc(b.dropofflocationname)}, ${esc(b.dropoffdate)} ${esc(b.dropofftime)}</dd>
