@@ -8,5 +8,12 @@ window.PORTAL_CONFIG = {
   brand: 'Waka Campa',
   supportEmail: 'bookings@wakacampa.com',
   defaultPickupTime: '10:00',
-  defaultDropoffTime: '10:00'
+  defaultDropoffTime: '10:00',
+  /* Fallback vehicle photos by category name (RCM's own images). RCM's imageurl is used first when it sends one. */
+  vehicleImages: {
+    'outrider': 'https://rentalcarmanagerau.blob.core.windows.net/public/nzwakacampa737/outrider.jpg',
+    'explorer neo': 'https://rentalcarmanagerau.blob.core.windows.net/public/nzwakacampa737/explorer-neo_rcm.jpeg',
+    'explorer': 'https://rentalcarmanagerau.blob.core.windows.net/public/nzwakacampa737/explorer_rcm.jpeg',
+    'explorer saver': 'https://rentalcarmanagerau.blob.core.windows.net/public/nzwakacampa737/explorer-saver_rcm.jpeg'
+  }
 };
