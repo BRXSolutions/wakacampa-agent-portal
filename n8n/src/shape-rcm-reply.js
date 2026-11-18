@@ -78,7 +78,16 @@ if (ctx.post === 'booking') {
   const properties = {
     booking_number: String(first.reservationno),
     reservationno: Number(first.reservationno),
-    reservationstatus: booking.isQuotation ? 'quotation' : 'reservation',
+    /* NOT isQuotation. GoHighLevel's Reservation Status option list allows only
+       hired, reservation, cancelled, returned and maintenance. Writing
+       'quotation' made GHL answer 400 "quotation isn't an allowed option for
+       Reservation Status", so the agent booking record was never created and
+       the portal's follow-up bookinginfo lookup replied "Booking not found".
+       That was the quote-request crash Max hit on 18 Nov (RCM quotes 5738 and
+       5739 exist with no record on our side). Reservations were unaffected.
+       booking_type below already carries quotation vs booking, and RCM itself
+       reports a quotation with reservationstatus "Reservation". */
+    reservationstatus: 'reservation',
     reservationcreateddate: today,
     pickupdate: booking.pickupDate,
     dropoffdate: booking.dropoffDate,
