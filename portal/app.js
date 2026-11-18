@@ -76,7 +76,57 @@
     $('#who-name').textContent = p ? `${p.user && p.user.name ? p.user.name + ' · ' : ''}${p.agency ? p.agency.name : ''}` : '';
     $$('#nav a').forEach(a => a.classList.toggle('active', route.startsWith(a.dataset.route)));
   }
+  /* ---------------- theme ----------------
+     Max, 18 Nov: "UI is nice but always in dark mode, can you add light mode?"
+     The palette was already light by default; agents on a dark phone or laptop
+     just had no way to override the device. This stores an explicit choice. */
+  (function theme() {
+    const KEY = 'wc_agent_theme';
+    let pick = null;
+    try { pick = localStorage.getItem(KEY); } catch (e) { pick = null; }
+    const apply = (v) => {
+      if (v) document.documentElement.setAttribute('data-theme', v);
+      else document.documentElement.removeAttribute('data-theme');
+      const dark = v ? v === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+      const btn = $('#theme-btn');
+      if (btn) { btn.textContent = dark ? '\u2600' : '\u263D';
+                 btn.title = dark ? 'Switch to light' : 'Switch to dark'; }
+    };
+    apply(pick);
+    const btn = $('#theme-btn');
+    if (btn) btn.addEventListener('click', () => {
+      const darkNow = document.documentElement.getAttribute('data-theme')
+        ? document.documentElement.getAttribute('data-theme') === 'dark'
+        : matchMedia('(prefers-color-scheme: dark)').matches;
+      const next = darkNow ? 'light' : 'dark';
+      try { localStorage.setItem(KEY, next); } catch (e) {}
+      apply(next);
+    });
+  })();
+
   $('#sign-out').addEventListener('click', () => { api.signOut(); state.ref = null; go('login'); });
+
+  /* Dial codes for the hirer's mobile. Max, 18 Nov: "Mobile field > Add an
+     international code selection". Most hirers are overseas, and a number
+     stored without a country code cannot be called or texted from New Zealand. */
+  const DIAL_CODES = [
+    { code: '+64', label: '+64 NZ' }, { code: '+61', label: '+61 AU' },
+    { code: '+44', label: '+44 UK' }, { code: '+1', label: '+1 US/CA' },
+    { code: '+49', label: '+49 DE' }, { code: '+33', label: '+33 FR' },
+    { code: '+31', label: '+31 NL' }, { code: '+39', label: '+39 IT' },
+    { code: '+34', label: '+34 ES' }, { code: '+41', label: '+41 CH' },
+    { code: '+43', label: '+43 AT' }, { code: '+32', label: '+32 BE' },
+    { code: '+45', label: '+45 DK' }, { code: '+46', label: '+46 SE' },
+    { code: '+47', label: '+47 NO' }, { code: '+353', label: '+353 IE' },
+    { code: '+351', label: '+351 PT' }, { code: '+420', label: '+420 CZ' },
+    { code: '+48', label: '+48 PL' }, { code: '+972', label: '+972 IL' },
+    { code: '+65', label: '+65 SG' }, { code: '+60', label: '+60 MY' },
+    { code: '+81', label: '+81 JP' }, { code: '+82', label: '+82 KR' },
+    { code: '+86', label: '+86 CN' }, { code: '+852', label: '+852 HK' },
+    { code: '+886', label: '+886 TW' }, { code: '+91', label: '+91 IN' },
+    { code: '+27', label: '+27 ZA' }, { code: '+55', label: '+55 BR' },
+    { code: '+56', label: '+56 CL' }, { code: '+54', label: '+54 AR' }
+  ];
 
   /* ---------------- login ---------------- */
   function viewLogin() {
@@ -304,9 +354,17 @@
     const total = rows.find(r => r.type === 'total');
     const car = (state.step3 && state.step3.availablecars && state.step3.availablecars[0]) || null;
     const head = car ? `<div class="sum-car">${photo(car, 'sum-img')}<div><strong>${esc(car.vehiclecategory)}</strong><div class="small muted">${esc(car.numberofdays)} days</div></div></div>` : '';
+    /* Your commission, shown before the agent commits. Max, 18 Nov: "Can you
+       please add an highlight 'Your commission' to the booking / Quote stage".
+       It is an estimate from the agency's rate on the total; RCM still works out
+       the booking's actual commission, so it is labelled as an estimate rather
+       than quietly presented as final. */
+    const pct = Number(((api.profile() || {}).agency || {}).commissionpct || 0);
+    const commission = pct > 0 ? Math.round(total.total * pct) / 100 : null;
     return `${head}<h2>Price</h2><table class="lines">${body}
       <tr class="total"><td>Total</td><td>${money(total.total)}</td></tr>
-      ${tax ? `<tr class="sub"><td>${esc(tax.name)}</td><td>${money(tax.total)}</td></tr>` : ''}</table>
+      ${tax ? `<tr class="sub"><td>${esc(tax.name)}</td><td>${money(tax.total)}</td></tr>` : ''}
+      ${commission !== null ? `<tr class="commission"><td>Your commission (${esc(pct)}%, estimate)</td><td>${money(commission)}</td></tr>` : ''}</table>
       ${button ? `<div class="actions" style="margin-top:16px"><button class="btn secondary" onclick="location.hash='#/search'">Back</button>${button}</div>` : ''}`;
   }
 
@@ -333,26 +391,26 @@
     const loc = ref.locations.find(l => String(l.id) === String(state.search.pickuplocationid)) || {};
     app.innerHTML = `
       <div class="steps"><span>1 Search</span>›<span>2 Extras</span>›<span class="on">3 Customer</span>›<span>4 Confirm</span></div>
-      <div class="page-head"><div><h1>Hirer details</h1><p class="muted">The main driver. Additional drivers can be added at pick-up.</p></div></div>
+      <div class="page-head"><div><h1>Hirer details</h1><p class="muted">The main driver. Additional drivers can be added at pick-up.</p><p class="field-legend"><span class="req">*</span> required, everything else optional.</p></div></div>
       <div class="layout-2">
         <form id="f-cust" class="card stack">
           <div class="grid grid-2">
-            <div><label>First name</label><input name="firstname" value="${esc(c.firstname)}" maxlength="30" required></div>
-            <div><label>Last name</label><input name="lastname" value="${esc(c.lastname)}" maxlength="40" required></div>
-            <div><label>Email</label><input type="email" name="email" value="${esc(c.email)}" maxlength="50" required></div>
-            <div><label>Mobile</label><input name="mobile" value="${esc(c.mobile)}" maxlength="25"></div>
-            <div><label>Date of birth</label><input type="date" name="dateofbirth" value="${esc(c.dateofbirth)}"></div>
-            <div><label>Country of residence</label><select name="countryid"><option value="">Select</option>${countries.map(x => `<option value="${esc(x.id)}" ${String(x.id) === String(c.countryid) ? 'selected' : ''}>${esc(x.country)}</option>`).join('')}</select></div>
-            <div><label>Licence number</label><input name="licenseno" value="${esc(c.licenseno)}" maxlength="70"></div>
-            <div><label>Licence issued in</label><input name="licenseissued" value="${esc(c.licenseissued)}" maxlength="20"></div>
+            <div><label>First name<span class="req">*</span></label><input name="firstname" value="${esc(c.firstname)}" maxlength="30" required></div>
+            <div><label>Last name<span class="req">*</span></label><input name="lastname" value="${esc(c.lastname)}" maxlength="40" required></div>
+            <div><label>Hirer's email<span class="req">*</span></label><input type="email" name="email" value="${esc(c.email)}" maxlength="50" required><div class="field-hint">The traveller's own address, not the agency's. Waka Campa writes to this address.</div></div>
+            <div><label>Hirer's mobile<span class="opt">optional</span></label><div class="mobile-row"><select name="mobilecc">${DIAL_CODES.map(d => `<option value="${esc(d.code)}" ${d.code === (c.mobilecc || '+64') ? 'selected' : ''}>${esc(d.label)}</option>`).join('')}</select><input name="mobile" value="${esc(c.mobile)}" maxlength="25" inputmode="tel"></div></div>
+            <div><label>Date of birth<span class="opt">optional</span></label><input type="date" name="dateofbirth" value="${esc(c.dateofbirth)}"></div>
+            <div><label>Country of residence<span class="opt">optional</span></label><select name="countryid"><option value="">Select</option>${countries.map(x => `<option value="${esc(x.id)}" ${String(x.id) === String(c.countryid) ? 'selected' : ''}>${esc(x.country)}</option>`).join('')}</select></div>
+            <div><label>Licence number<span class="opt">optional</span></label><input name="licenseno" value="${esc(c.licenseno)}" maxlength="70"></div>
+            <div><label>Licence issued in<span class="opt">optional</span></label><input name="licenseissued" value="${esc(c.licenseissued)}" maxlength="20"></div>
           </div>
           <div class="grid grid-2">
-            <div><label>Your reference</label><input name="agentrefno" value="${esc(c.agentrefno)}" maxlength="50"><div class="field-hint">Saved with the booking and shown in My bookings.</div></div>
-            <div><label>Number travelling</label><input type="number" min="1" max="12" name="numbertravelling" value="${esc(c.numbertravelling || '')}"></div>
-            <div><label>Arrival flight${loc.isflightinrequired ? ' (required)' : ''}</label><input name="flightin" value="${esc(c.flightin)}" maxlength="50" ${loc.isflightinrequired ? 'required' : ''}></div>
-            <div><label>Departure flight</label><input name="flightout" value="${esc(c.flightout)}" maxlength="50"></div>
+            <div><label>Your reference<span class="opt">optional</span></label><input name="agentrefno" value="${esc(c.agentrefno)}" maxlength="50"><div class="field-hint">Saved with the booking and shown in My bookings.</div></div>
+            <div><label>Number travelling<span class="opt">optional</span></label><input type="number" min="1" max="12" name="numbertravelling" value="${esc(c.numbertravelling || '')}"></div>
+            <div><label>Arrival flight${loc.isflightinrequired ? '<span class="req">*</span>' : '<span class="opt">optional</span>'}</label><input name="flightin" value="${esc(c.flightin)}" maxlength="50" ${loc.isflightinrequired ? 'required' : ''}></div>
+            <div><label>Departure flight<span class="opt">optional</span></label><input name="flightout" value="${esc(c.flightout)}" maxlength="50"></div>
           </div>
-          <div><label>Notes for Waka Campa</label><textarea name="remark" maxlength="250" rows="3">${esc(c.remark)}</textarea></div>
+          <div><label>Notes for Waka Campa<span class="opt">optional</span></label><textarea name="remark" maxlength="250" rows="3">${esc(c.remark)}</textarea></div>
           <div class="grid grid-2">
             <label class="option"><input type="radio" name="bookingtype" value="2" ${c.bookingtype !== '1' ? 'checked' : ''}><span class="grow"><strong>Make a reservation</strong><br><span class="small muted">Holds the vehicle</span></span></label>
             <label class="option"><input type="radio" name="bookingtype" value="1" ${c.bookingtype === '1' ? 'checked' : ''}><span class="grow"><strong>Save as quotation</strong><br><span class="small muted">Valid ${esc(loc.quoteisvalid_numberofdays || 7)} days, not held</span></span></label>
@@ -370,6 +428,11 @@
       const total = state.totals.totals.find(r => r.type === 'total').total;
       const customer = {};
       ['firstname', 'lastname', 'email', 'mobile', 'countryid', 'licenseno', 'licenseissued'].forEach(k => { if (f[k]) customer[k] = f[k].trim(); });
+      /* Put the dial code on the front unless the agent already typed one. A
+         local-format number is useless to us once the hirer is overseas. */
+      if (customer.mobile && !customer.mobile.startsWith('+')) {
+        customer.mobile = (f.mobilecc || '+64') + ' ' + customer.mobile.replace(/^0+/, '');
+      }
       if (f.dateofbirth) customer.dateofbirth = toRcm(f.dateofbirth);
       try {
         const res = (await api.call('booking', Object.assign(selectionParams(), {
@@ -480,10 +543,12 @@
             ${(info.extrafees || []).map(f => `<tr><td>${esc(f.name)}${f.qty > 1 ? ' × ' + esc(f.qty) : ''}</td><td>${money(f.totalfeeamount)}</td></tr>`).join('')}
             <tr class="total"><td>Total</td><td>${money(b.totalcost)}</td></tr>
             <tr class="sub"><td>${esc(b.taxname2 || 'GST')} included</td><td>${money(b.gst)}</td></tr>
+            ${cancelled ? '' : `
             ${b.payment ? `<tr class="sub"><td>Collected by agent</td><td>−${money(b.payment)}</td></tr>` : ''}
             <tr class="sub"><td>Your commission</td><td>−${money(b.agentcommission)}</td></tr>
-            <tr class="total"><td>Net due to Waka Campa</td><td>${money(b.agentnetamountdue)}</td></tr>
+            <tr class="total"><td>Net due to Waka Campa</td><td>${money(b.agentnetamountdue)}</td></tr>`}
           </table>
+          ${cancelled ? '<p class="cancelled-note">This booking is cancelled. Nothing is collected, no commission is earned and nothing is due, so the agent lines are not shown. Reservation 5548 was reported on 18 Nov still showing a negative commission and a net amount due.</p>' : ''}
         </aside>
       </div>
       <div id="cancel-box"></div>`;
