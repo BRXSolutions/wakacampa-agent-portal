@@ -18,14 +18,31 @@
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
 }
+/* Device preference, only while the agent has not chosen for themselves. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme]) {
     --bg: #000000; --surface: #111111; --ink: #f5f5f5; --muted: #a3a3a3; --line: #2a2a2a;
     --accent: #ffffff; --accent-ink: #000000; --accent-soft: #1f1f1f;
     --warn: #d4d4d4; --warn-soft: #262626; --bad: #ff8a80; --bad-soft: #2b1514; --good: #ffffff;
     color-scheme: dark;
   }
 }
+/* An explicit choice always wins over the device. Max asked for a light mode
+   on 18 Nov: the palette was already light by default, but anyone whose phone
+   or laptop is set to dark could never get at it. */
+:root[data-theme="dark"] {
+  --bg: #000000; --surface: #111111; --ink: #f5f5f5; --muted: #a3a3a3; --line: #2a2a2a;
+  --accent: #ffffff; --accent-ink: #000000; --accent-soft: #1f1f1f;
+  --warn: #d4d4d4; --warn-soft: #262626; --bad: #ff8a80; --bad-soft: #2b1514; --good: #ffffff;
+  color-scheme: dark;
+}
+:root[data-theme="light"] {
+  --bg: #f5f5f5; --surface: #ffffff; --ink: #0a0a0a; --muted: #666666; --line: #e2e2e2;
+  --accent: #0a0a0a; --accent-ink: #ffffff; --accent-soft: #efefef;
+  --warn: #3d3d3d; --warn-soft: #e6e6e6; --bad: #b3261e; --bad-soft: #fbeceb; --good: #0a0a0a;
+  color-scheme: light;
+}
+
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.5; }
@@ -40,7 +57,7 @@ p { margin: 0 0 12px; }
 .topbar { background: #000; color: #fff; border-bottom: 1px solid #000; position: sticky; top: 0; z-index: 5; }
 .topbar-inner { max-width: 1080px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 24px; }
 .brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #fff; font-weight: 700; letter-spacing: .02em; }
-.brand-mark { background: #fff; color: #000; border-radius: 8px; width: 32px; height: 32px; display: grid; place-items: center; font-size: 13px; }
+.brand-mark { background: #fff; border-radius: 8px; width: 32px; height: 32px; object-fit: contain; display: block; }
 .brand-name em { font-style: normal; color: #a3a3a3; font-weight: 500; }
 .nav { display: flex; gap: 4px; }
 .nav a { text-decoration: none; color: #bdbdbd; padding: 6px 12px; border-radius: 8px; font-weight: 500; }
@@ -139,3 +156,16 @@ table.list tr.clickable:hover td { background: var(--accent-soft); }
 @keyframes spin { to { transform: rotate(360deg); } }
 .center { text-align: center; padding: 48px 0; }
 .login { max-width: 420px; margin: 48px auto; }
+
+/* Theme switch, required/optional cues and the commission line. */
+.theme-btn { margin-left: auto; margin-right: 12px; background: transparent; color: #fff; border: 1px solid #333; border-radius: 8px; width: 32px; height: 32px; cursor: pointer; font-size: 15px; line-height: 1; }
+.theme-btn:hover { border-color: #777; }
+label .req { color: var(--bad); margin-left: 2px; }
+label .opt { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 4px; }
+.field-legend { color: var(--muted); font-size: 12px; margin: -4px 0 4px; }
+.lines tr.commission td { color: var(--muted); }
+.lines tr.commission td:last-child { font-weight: 600; color: var(--ink); }
+.cancelled-note { color: var(--muted); font-size: 13px; margin-top: 8px; }
+.mobile-row { display: flex; gap: 6px; }
+.mobile-row select { flex: 0 0 110px; }
+.mobile-row input { flex: 1 1 auto; min-width: 0; }

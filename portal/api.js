@@ -90,6 +90,15 @@
       const r = (await call('login.verify', { email, code }))[0];
       store.set(TOKEN_KEY, r.token);
       store.set('wc_agent_profile', JSON.stringify({ user: r.user, agency: r.agency }));
+      /* login.verify does not carry the commission rate, but 'me' does, and the
+         agent needs it on screen before they commit a booking (Max, 18 Nov).
+         Best effort: a failure here must never block a sign-in. */
+      try {
+        const me = (await call('me'))[0] || {};
+        const prof = { user: r.user, agency: Object.assign({}, r.agency, {
+          commissionpct: me.commissionpct, cancancel: me.cancancel }) };
+        store.set('wc_agent_profile', JSON.stringify(prof));
+      } catch (e) { /* keep the basic profile */ }
       return r;
     },
     profile() { try { return JSON.parse(store.get('wc_agent_profile') || 'null'); } catch (e) { return null; } }

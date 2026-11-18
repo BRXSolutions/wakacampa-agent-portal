@@ -6,7 +6,8 @@
 window.PORTAL_CONFIG = {
   apiUrl: 'https://n8n.wakacampa.com/webhook/dev-agent-api',
   brand: 'Waka Campa',
-  supportEmail: 'bookings@wakacampa.com',
+  logoUrl: 'https://storage.googleapis.com/msgsndr/wMnxsKTekNKeaukJxYh8/media/17385b50-5c58-4caf-8349-97b9179032b2.jpg',
+  supportEmail: 'support@wakacampa.com',
   defaultPickupTime: '10:00',
   defaultDropoffTime: '10:00',
   /* Fallback vehicle photos by category name (RCM's own images). RCM's imageurl is used first when it sends one. */
