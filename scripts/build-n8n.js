@@ -37,6 +37,22 @@ const config = {
   loginCodeTtlSeconds: 600,
   loginMaxAttempts: 5,
   agentTag: 'agent_user',
+  /*
+   * How the booking is attached to the agency inside RCM.
+   *
+   *   'agent'  - send agentcode and the agent's details on the booking. RCM holds the
+   *              Agency and the Agent, and RCM calculates the commission and the agent
+   *              collected amount from the agency's own rate. Nothing is posted as an
+   *              Account/Chq payment.
+   *   'direct' - the previous behaviour. Booked as Waka Campa with the agency only
+   *              named in the booking notes, commission worked out by us from the GHL
+   *              agency record, and the collected amount posted as an Account/Chq
+   *              payment so the hirer's balance reads correctly.
+   *
+   * 'agent' needs the agency to exist in RCM with a matching agent code. Override with
+   * AGENT_RCM_MODE=direct at build time to go back without editing this file.
+   */
+  agentMode: process.env.AGENT_RCM_MODE || 'agent',
   bookingsObjectKey: 'custom_objects.bookings',
   rcmApiKey: RCM_USER,
   rcmSharedSecret: RCM_PASS
