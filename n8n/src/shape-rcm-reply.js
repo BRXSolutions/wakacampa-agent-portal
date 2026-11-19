@@ -43,6 +43,13 @@ if (ctx.post === 'booking') {
     const s = String(v || '').trim();
     let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
     m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    /* RCM's own display format, 10/Apr/2027. The portal sends 10/04/2027, but a partner system
+       on the Agent API can reasonably send RCM's, and GHL then rejected the whole register write
+       with "isn't a valid date for Dropoff Date Format" - the booking existed in RCM with no
+       record on our side. use-registry.js already accepted this form; now both do. */
+    const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+    m = s.match(/^(\d{1,2})[\/\-\s]([A-Za-z]{3})[A-Za-z]*[\/\-\s](\d{4})$/);
+    if (m && MON.indexOf(m[2].toLowerCase()) >= 0) return `${m[3]}-${String(MON.indexOf(m[2].toLowerCase()) + 1).padStart(2, '0')}-${m[1].padStart(2, '0')}`;
     return s;
   };
   const booking = {
@@ -71,7 +78,10 @@ if (ctx.post === 'booking') {
     total: ctx.display.total,
     customer: { firstname: reqBody.customer.firstname || '', lastname: reqBody.customer.lastname, email: reqBody.customer.email },
     engine: 'rcm-mirror',
-    rcmMode: 'direct',
+    /* 'agent' means RCM holds the agency, the agent and the commission. 'direct' means we do.
+       Stored per booking, so a booking made under one mode keeps behaving that way afterwards -
+       the cancel path reads it to decide whether to send agentcode. */
+    rcmMode: CONFIG.agentMode === 'agent' ? 'agent' : 'direct',
     commissionPct: Number(ctx.agency.commissionPct || 0),
     commissionOnFees: !!ctx.agency.commissionOnFees
   };

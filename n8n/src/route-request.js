@@ -77,14 +77,29 @@ if (method === 'booking' || method === 'savebooking') {
   }
   p.customer = customer;
   p.bookingtype = Number(p.bookingtype || 2);
-  /* Booked in RCM as a Waka Campa booking. The agency is recorded in the booking notes and in our own register. */
   const agent = { name: String(user.name || ''), email: String(user.email || ''), refNo: String(p.agentrefno || '').slice(0, 50) };
   /* Like RCM's "API: Allow define Collected Amt": only agencies allowed to may set their own collected amount. */
   if (agency.allowCollected && p.agentcollectedamount !== undefined && p.agentcollectedamount !== '' && isFinite(Number(p.agentcollectedamount))) agent.collected = Number(p.agentcollectedamount);
+  /* Whatever the caller sent is dropped first. The agency is taken from the signed session, never from the request. */
   ['agentname', 'agentemail', 'agentrefno', 'agentcollectedamount', 'campaigncode', 'referralid'].forEach(k => delete p[k]);
-  const agencyLabel = String(agency.name).toUpperCase().includes('(' + String(agency.agentCode).toUpperCase() + ')') ? agency.name : `${agency.name} (${agency.agentCode})`;
-  const label = `Agent booking: ${agencyLabel}${agent.refNo ? '. Agent ref ' + agent.refNo : ''}. Booked by ${agent.name || agent.email}.`;
-  p.remark = (label + (p.remark ? ' Notes: ' + String(p.remark) : '')).slice(0, 250);
+
+  if (CONFIG.agentMode === 'agent') {
+    /* RCM holds the Agency and the Agent. It then works out the commission and the collected
+       amount from the agency's own rate, so neither is sent and no payment is posted.
+       agentcollectedamount goes only when the agency is allowed to override RCM's figure -
+       RCM's own guidance is to leave the field out entirely otherwise. */
+    p.agentcode = String(agency.agentCode || '').slice(0, 20);
+    if (agent.name) p.agentname = agent.name.slice(0, 60);
+    if (agent.email) p.agentemail = agent.email.slice(0, 80);
+    if (agent.refNo) p.agentrefno = agent.refNo;
+    if (agent.collected !== undefined) p.agentcollectedamount = agent.collected;
+    if (p.remark) p.remark = String(p.remark).slice(0, 250);
+  } else {
+    /* Booked as Waka Campa. The agency exists only as text in the booking notes. */
+    const agencyLabel = String(agency.name).toUpperCase().includes('(' + String(agency.agentCode).toUpperCase() + ')') ? agency.name : `${agency.name} (${agency.agentCode})`;
+    const label = `Agent booking: ${agencyLabel}${agent.refNo ? '. Agent ref ' + agent.refNo : ''}. Booked by ${agent.name || agent.email}.`;
+    p.remark = (label + (p.remark ? ' Notes: ' + String(p.remark) : '')).slice(0, 250);
+  }
   const display = {
     pickup: String(params.displaypickup || ''), dropoff: String(params.displaydropoff || ''),
     category: String(params.displaycategory || ''), total: Number(params.expectedtotal || 0),
