@@ -1,8 +1,12 @@
 /*
- * Prepare Collected Payment: copy RCM's agent rule now that bookings are made as Waka Campa.
- * The agent collects their commission from the hirer: commission % x the rental amount (fees too only
- * when the agency has commission_on_fees). It is recorded in RCM as an Account/Chq payment so the
- * hirer's balance is right, and kept on the GHL booking record.
+ * Prepare Collected Payment: works out what the agent collected and keeps it on the GHL record.
+ *
+ * In AGENT mode RCM already holds the agency and has applied its own collected amount, so this
+ * node records RCM's figures and posts nothing back.
+ *
+ * In DIRECT mode the booking is made as Waka Campa, so we copy RCM's agent rule ourselves:
+ * commission % x the rental amount (fees too only when the agency has commission_on_fees),
+ * posted to RCM as an Account/Chq payment so the hirer's balance reads correctly.
  */
 const ctx = $('After RCM').first().json;
 const info = ($input.first() || {}).json || {};
@@ -16,7 +20,11 @@ const rentalFromRcm = (Array.isArray(res.rateinfo) ? res.rateinfo : []).reduce((
 const rental = rentalFromRcm > 0 ? rentalFromRcm : Number(ctx.rentalEstimate || 0);
 const pct = Number(booking.commissionPct || 0);
 const base = booking.commissionOnFees ? total : rental;
-const commission = round2(base * pct / 100);
+/* In agent mode RCM has already worked the commission out from the agency's own rate, so its
+   figure wins and ours is only a fallback for a reply that did not carry one. */
+const rcmCommission = Number(bi.agentcommission || 0);
+const agentMode = CONFIG.agentMode === 'agent';
+const commission = (agentMode && rcmCommission > 0) ? round2(rcmCommission) : round2(base * pct / 100);
 
 let collected = commission;
 if (ctx.allowCollected && ctx.requestedCollected !== null && ctx.requestedCollected !== undefined && ctx.requestedCollected !== '') {
@@ -28,8 +36,10 @@ Object.assign(booking, {
   rental: round2(rental),
   commission,
   collected,
-  netDue: round2(total - commission),
-  rentalSource: rentalFromRcm > 0 ? 'rcm' : 'estimate'
+  netDue: (agentMode && bi.agentnetamountdue !== undefined && bi.agentnetamountdue !== null)
+    ? round2(bi.agentnetamountdue) : round2(total - commission),
+  rentalSource: rentalFromRcm > 0 ? 'rcm' : 'estimate',
+  commissionSource: (agentMode && rcmCommission > 0) ? 'rcm' : 'waka'
 });
 const properties = Object.assign({}, ctx.properties, {
   totalcost: { currency: 'default', value: booking.total || 0 },
@@ -50,8 +60,10 @@ const payBody = {
 };
 const bodyString = JSON.stringify(payBody);
 return [{ json: {
-  /* Quotations are not reservations: nothing has been collected yet. */
-  pay: collected > 0 && !booking.isQuotation,
+  /* Quotations are not reservations: nothing has been collected yet.
+     In agent mode RCM applies the collected amount itself from the agency's rate, so posting
+     our own Account/Chq line would double it up. The payment exists only in direct mode. */
+  pay: !agentMode && collected > 0 && !booking.isQuotation,
   bodyString,
   signature: AUTH.hmacHex(CONFIG.rcmSharedSecret, bodyString),
   properties,
