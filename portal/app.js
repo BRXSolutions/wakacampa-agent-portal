@@ -246,7 +246,10 @@
       ${cars.length ? '' : '<div class="card muted">No vehicles match this search.</div>'}
       ${cars.map(c => {
         const mand = fees(c.vehiclecategoryid).reduce((a, f) => a + Number(f.totalfeeamount || 0), 0);
-        const badge = c.available === 2 ? '<span class="badge warn">Only a few left</span>' : c.available === 1 ? '<span class="badge">Available</span>' : `<span class="badge bad">${esc(c.availablemessage)}</span>`;
+        /* RCM's availability codes: 0 not available, 1 available, 2 limited availability. 2 is a
+           stock level, NOT RCM's "on request" status, which is a different thing entirely. The old
+           wording here was "Only a few left", which Max read as on request on 18 Nov. */
+        const badge = c.available === 2 ? '<span class="badge warn">Limited availability</span>' : c.available === 1 ? '<span class="badge">Available</span>' : `<span class="badge bad">${esc(c.availablemessage)}</span>`;
         return `
         <div class="card car ${c.available ? '' : 'unavailable'}">
           <div class="car-photo">${photo(c, 'car-img')}</div>
